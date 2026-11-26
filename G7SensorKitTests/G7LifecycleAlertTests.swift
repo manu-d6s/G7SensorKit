@@ -169,6 +169,25 @@ class G7LifecycleAlertManagerTests: XCTestCase {
         XCTAssertTrue(recorder.cgmEvents.dropFirst().contains { $0.type == .sensorEnd })
     }
 
+    /// A watch reads the same sensor as the phone that passed it; recording its own events would
+    /// put each sensor issue and sensor end in the history twice, and an end without a start.
+    func testAPassedManagerLeavesTheSensorsRecordsToThePhone() {
+        var state = G7CGMManagerState()
+        state.sensorID = "DXCM99"
+        state.activatedAt = Date(timeIntervalSinceNow: -3600)
+        state.pairingCode = "1234"
+        state.sessionMode = .direct
+        state.configuredByAnotherController = true
+        let manager = makeManager(state: state)
+
+        manager.sensor(manager.sensor, didRead: reading(state: 2, minutes: 1))
+        manager.sensor(manager.sensor, didRead: reading(state: 25, minutes: 6))
+        settle()
+
+        XCTAssertTrue(recorder.cgmEvents.isEmpty, "recorded: \(recorder.cgmEvents.map(\.type))")
+        XCTAssertNil(manager.state.previousSensor)
+    }
+
     func testSensorIssueStartsOverForANewSensor() {
         var state = G7CGMManagerState()
         state.sensorID = "DXCM99"

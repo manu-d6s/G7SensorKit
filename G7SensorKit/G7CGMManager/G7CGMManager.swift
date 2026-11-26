@@ -629,7 +629,7 @@ extension G7CGMManager {
     /// way the pump plugins keep their previous pod: what it was, how and
     /// when it was paired, and how it ended.
     private func archiveCurrentSensor(reason: G7SensorRecord.EndReason) {
-        guard let sensorID = state.sensorID else {
+        guard !state.configuredByAnotherController, let sensorID = state.sensorID else {
             return
         }
         let record = G7SensorRecord(
@@ -704,7 +704,9 @@ extension G7CGMManager {
             state.sensorIssueReportedFor = sensorID
             state.reportedSensorIssue = issue
         }
-        guard let issue else {
+        // A manager passed its configuration tracks the issue for its own display, but the
+        // sensor's records are the controller's that passed it, which reads the same sensor.
+        guard let issue, !state.configuredByAnotherController else {
             return
         }
         let activationDate = sensor.activationDate ?? state.activatedAt
@@ -724,7 +726,9 @@ extension G7CGMManager {
     /// brackets each session; Loop tolerates a missing end, which is why this
     /// is also safe to call speculatively when a sensor is forgotten.
     private func recordSensorEndIfNeeded(failureMessage: String? = nil) {
-        guard let sensorID = state.sensorID, state.sensorEndRecordedFor != sensorID else {
+        // A manager passed its configuration never recorded the start either.
+        guard !state.configuredByAnotherController,
+              let sensorID = state.sensorID, state.sensorEndRecordedFor != sensorID else {
             return
         }
         recordPendingSensorStart(force: true)
