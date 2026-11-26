@@ -30,8 +30,12 @@ public struct G7GlucoseMessage: SensorMessage, Equatable {
         return algorithmState.hasReliableGlucose
     }
 
+    /// The reading's own time on the sensor's clock. A reading cannot predate activation, so an
+    /// age beyond the message time only comes from a damaged frame; clamp to activation rather than
+    /// trap on the unsigned subtraction.
     public var glucoseTimestamp: UInt32 {
-        return messageTimestamp - UInt32(age)
+        let age = UInt32(age)
+        return messageTimestamp >= age ? messageTimestamp - age : 0
     }
 
     /// Beyond this rate the Dexcom apps show no arrow at all. The wire value
