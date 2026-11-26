@@ -166,13 +166,20 @@ final class G7WatchAcquisition: G7AcquisitionArm {
         let code = (error as NSError?).map { "\($0.domain)#\($0.code) \($0.localizedDescription)" } ?? "no error"
         switch G7WatchAcquisition.onConnectFailure(sinceLodge: sinceLodge) {
         case .backOff(let s):
-            watchLog(String(format: "REFUSED %.2f s after the lodge (%@) — lodging again in %.0f s", sinceLodge, code, s))
+            watchLog(String(format: "REFUSED %.2f s after the lodge (%@) — holding the process, lodging again in %.0f s", sinceLodge, code, s))
             let id = peripheral.identifier
             let started = epoch
-            queue.asyncAfter(deadline: .now() + s) { [weak self] in
-                guard let self, self.epoch == started, !self.lodged,
-                      let p = self.central.retrievePeripherals(withIdentifiers: [id]).first, p.state == .disconnected else { return }
-                self.lodge(p, why: "after the refusal backoff")
+            // Nothing is lodged during the wait, so nothing would wake a suspended app afterwards:
+            // hold the process through it, as the re-lodge after the sensor's tail does.
+            holdPending = true
+            holdProcess(reason: "G7 re-lodge after a refused connect", upTo: s) { [weak self] systemEnded in
+                self?.queue.async {
+                    guard let self, self.epoch == started else { return }
+                    self.holdPending = false
+                    guard !self.lodged,
+                          let p = self.central.retrievePeripherals(withIdentifiers: [id]).first, p.state == .disconnected else { return }
+                    self.lodge(p, why: systemEnded ? "refusal backoff ended by the system" : "after the refusal backoff")
+                }
             }
         case .relodge:
             watchLog(String(format: "connect failed %.0f s after the lodge (%@) — re-lodging", sinceLodge, code))
