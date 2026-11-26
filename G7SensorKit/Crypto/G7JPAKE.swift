@@ -12,6 +12,12 @@ enum G7JPAKEError: Error {
     /// `makeRound3` or `deriveSharedKey` was called before both of our own
     /// ephemeral keypairs existed.
     case outOfOrder
+
+    /// A point the sensor sent is not a point on P-256, or is the point at
+    /// infinity, or the exchange landed on infinity. A genuine sensor never
+    /// does this; a device that does could steer the derived key to a value
+    /// it knows without the pairing code, so the exchange stops here.
+    case invalidPeerPoint
 }
 
 /// Client side of the password-authenticated key exchange a G7-family sensor
@@ -86,11 +92,16 @@ final class G7JPAKE {
         guard let keyPair1 = keyPair1, let keyPair2 = keyPair2 else {
             throw G7JPAKEError.outOfOrder
         }
+        try G7JPAKE.requireValidPeerPoint(peerRound1.publicKey)
+        try G7JPAKE.requireValidPeerPoint(peerRound2.publicKey)
         let blindedKey = G7BigUInt.mulMod(keyPair2.privateKey, pin, G7P256.order)
         let base = G7P256.add(
             G7P256.add(keyPair1.publicKey, peerRound1.publicKey),
             peerRound2.publicKey
         )
+        guard !base.isInfinity else {
+            throw G7JPAKEError.invalidPeerPoint
+        }
         let publicKey = G7P256.multiply(base, by: blindedKey)
         return makeCert(
             base: base,
@@ -106,6 +117,12 @@ final class G7JPAKE {
         guard let keyPair2 = keyPair2 else {
             throw G7JPAKEError.outOfOrder
         }
+        // The two points the key is computed from. Without these checks a
+        // point off the curve (for example one with y = 0, which the
+        // arithmetic treats as having order two) forces the shared point to
+        // a fixed value whatever the pairing code is.
+        try G7JPAKE.requireValidPeerPoint(peerRound2.publicKey)
+        try G7JPAKE.requireValidPeerPoint(peerRound3.publicKey)
         // Strip our own blinding from the sensor's confirmation value, then
         // apply our round-2 private key to land on the shared point.
         let blindedKey = G7BigUInt.mulMod(keyPair2.privateKey, pin, G7P256.order)
@@ -114,7 +131,19 @@ final class G7JPAKE {
             G7P256.add(peerRound3.publicKey, G7P256.multiply(peerRound2.publicKey, by: unblind)),
             by: keyPair2.privateKey
         )
+        guard !shared.isInfinity else {
+            throw G7JPAKEError.invalidPeerPoint
+        }
         return Data(SHA256.hash(data: shared.x.bigEndianBytes(paddedTo: 32)))
+    }
+
+    /// A public key from the sensor must be a finite point on the curve with
+    /// both coordinates below the field prime. P-256 has cofactor 1, so that
+    /// also rules out small-subgroup points.
+    static func requireValidPeerPoint(_ point: G7P256Point) throws {
+        guard !point.isInfinity, G7P256.isOnCurve(point) else {
+            throw G7JPAKEError.invalidPeerPoint
+        }
     }
 
     // MARK: - Verifying the sensor's proofs

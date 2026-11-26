@@ -218,6 +218,59 @@ class G7JPAKETests: XCTestCase {
         XCTAssertThrowsError(try G7PCert(data: Data(repeating: 0, count: 161)))
     }
 
+    /// A point with y = 0 is not on P-256, but the doubling formula treats it
+    /// as a point of order two, so without validation it pins the shared
+    /// point to a value that does not depend on the pairing code.
+    private static let orderTwoLookalike = G7P256Point(x: .zero, y: .zero)
+
+    private func forgedCert(_ point: G7P256Point) -> G7PCert {
+        G7PCert(publicKey: point, proofPoint: G7P256.generator, proof: .one)
+    }
+
+    func testDerivationRejectsAnOffCurveRound2Key() {
+        let jpake = G7JPAKE(pairingCode: "1155")
+        let sensor = SimulatedSensor(pairingCode: "1155", seed: 5)
+        _ = jpake.makeRound1()
+        let clientRound2 = try! G7PCert(data: jpake.makeRound2())
+        let sensorRound3 = sensor.round3(clientRound1: sensor.round1, clientRound2: clientRound2)
+        XCTAssertThrowsError(try jpake.deriveSharedSecret(
+            peerRound2: forgedCert(G7JPAKETests.orderTwoLookalike),
+            peerRound3: sensorRound3
+        )) { error in
+            XCTAssertEqual(error as? G7JPAKEError, .invalidPeerPoint)
+        }
+    }
+
+    func testDerivationRejectsAnOffCurveRound3Key() {
+        let jpake = G7JPAKE(pairingCode: "1155")
+        let sensor = SimulatedSensor(pairingCode: "1155", seed: 5)
+        _ = jpake.makeRound1()
+        _ = jpake.makeRound2()
+        XCTAssertThrowsError(try jpake.deriveSharedSecret(
+            peerRound2: sensor.round2,
+            peerRound3: forgedCert(G7JPAKETests.orderTwoLookalike)
+        )) { error in
+            XCTAssertEqual(error as? G7JPAKEError, .invalidPeerPoint)
+        }
+    }
+
+    func testRound3RejectsOffCurveSensorKeys() {
+        let jpake = G7JPAKE(pairingCode: "1155")
+        let sensor = SimulatedSensor(pairingCode: "1155", seed: 5)
+        _ = jpake.makeRound1()
+        _ = jpake.makeRound2()
+        let offCurve = G7P256Point(x: G7P256.generator.x, y: G7BigUInt.addMod(G7P256.generator.y, .one, G7P256.p))
+        XCTAssertThrowsError(try jpake.makeRound3(peerRound1: forgedCert(offCurve), peerRound2: sensor.round2))
+        XCTAssertThrowsError(try jpake.makeRound3(peerRound1: sensor.round1, peerRound2: forgedCert(offCurve)))
+    }
+
+    func testCoordinatesAtOrAboveThePrimeAreRejected() {
+        let unreduced = G7P256Point(x: G7P256.generator.x + G7P256.p, y: G7P256.generator.y)
+        XCTAssertThrowsError(try G7JPAKE.requireValidPeerPoint(unreduced))
+        XCTAssertThrowsError(try G7JPAKE.requireValidPeerPoint(.infinity))
+        XCTAssertNoThrow(try G7JPAKE.requireValidPeerPoint(G7P256.generator))
+    }
+
     func testOutOfOrderUse() {
         let jpake = G7JPAKE(pairingCode: "1155")
         let sensor = SimulatedSensor(pairingCode: "1155", seed: 5)
