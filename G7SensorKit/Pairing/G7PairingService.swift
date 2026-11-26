@@ -183,9 +183,26 @@ public final class G7PairingService {
 
     // MARK: - Control
 
-    /// Whether `code` has the shape of a G7 pairing code.
+    /// Whether `code` has the shape of a G7 pairing code: four ASCII digits, the bytes the key
+    /// exchange is computed over.
     public static func isValidPairingCode(_ code: String) -> Bool {
-        code.count == 4 && code.allSatisfy(\.isNumber)
+        code.count == 4 && code.allSatisfy { $0.isASCII && $0.isWholeNumber }
+    }
+
+    /// The decimal digits in `text`, as ASCII. A number pad set to Arabic-Indic numerals, or a
+    /// pasted full-width code, types digits that `isNumber` accepts but whose UTF-8 bytes are not
+    /// the code's, so every key exchange would fail. Other numerals (², ½, Ⅳ) are dropped.
+    public static func asciiDigits(_ text: String) -> String {
+        String(text.compactMap { character -> Character? in
+            guard character.unicodeScalars.count == 1,
+                  let scalar = character.unicodeScalars.first,
+                  scalar.properties.numericType == .decimal,
+                  let value = character.wholeNumberValue
+            else {
+                return nil
+            }
+            return Character(String(value))
+        })
     }
 
     /// Whether a scanned `serial` can narrow the scan.

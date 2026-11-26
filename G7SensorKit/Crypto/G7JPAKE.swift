@@ -49,7 +49,8 @@ final class G7JPAKE {
     private var keyPair2: (privateKey: G7BigUInt, publicKey: G7P256Point)?
 
     init(pairingCode: String, random: @escaping RandomBytesGenerator = G7JPAKE.secureRandomBytes) {
-        pin = G7BigUInt(bigEndianBytes: Data(pairingCode.utf8))
+        // ASCII digits, also for a code saved before entry was normalized.
+        pin = G7BigUInt(bigEndianBytes: Data(G7PairingService.asciiDigits(pairingCode).utf8))
         self.random = random
     }
 

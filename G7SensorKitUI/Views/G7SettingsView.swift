@@ -344,7 +344,7 @@ struct G7SettingsView: View {
                     TextField(LocalizedString("4-digit code", comment: "Placeholder for the G7 pairing code entry for the watch"), text: $viewModel.watchPairingCodeEntry)
                         .keyboardType(.numberPad)
                     Button(LocalizedString("Save", comment: "Button to save the G7 pairing code for the watch")) { viewModel.saveWatchPairingCode() }
-                        .disabled(viewModel.sensorName == nil || viewModel.watchPairingCodeEntry.filter { $0.isNumber }.count != 4)
+                        .disabled(viewModel.sensorName == nil || G7PairingService.asciiDigits(viewModel.watchPairingCodeEntry).count != 4)
                 }
             }
         }

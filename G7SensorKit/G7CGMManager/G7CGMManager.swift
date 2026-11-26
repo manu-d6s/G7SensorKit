@@ -353,7 +353,7 @@ public class G7CGMManager: CGMManager {
     /// if it is not 4 digits.
     @discardableResult
     public func setWatchPairingCode(_ code: String) -> Bool {
-        let digits = String(code.filter { $0.isNumber }.prefix(4))
+        let digits = String(G7PairingService.asciiDigits(code).prefix(4))
         guard G7PairingService.isValidPairingCode(digits) else { return false }
         mutateState { $0.pairingCode = digits }
         logDeviceCommunication("direct-read: pairing code saved for the watch (\(state.sensorID ?? "sensor"))", type: .connection)
