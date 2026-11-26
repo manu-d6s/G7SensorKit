@@ -174,8 +174,7 @@ class G7JPAKETests: XCTestCase {
         return G7PCert(publicKey: publicKey, proofPoint: proofPoint, proof: proof)
     }
 
-    /// The sensor signs its proofs as "server", the mbedtls EC-JPAKE identifier. The bytes used
-    /// before, 37 56 27 67 56 27, are "server" with each byte's hex digits swapped.
+    /// Proofs are checked against "server", and not against the byte-swapped form of it.
     func testSensorProofsAreCheckedAgainstTheServerIdentifier() {
         let jpake = G7JPAKE(pairingCode: "1155")
         XCTAssertTrue(jpake.validateRound1Or2(sensorProof(party: Array("server".utf8))))

@@ -33,12 +33,8 @@ final class G7JPAKE {
     /// Party identifier attached to proofs we generate.
     private static let ownParty = Array("client".utf8)
 
-    /// Party identifier attached to proofs the sensor generates.
-    ///
-    /// "server", the identifier mbedtls EC-JPAKE gives the server side. The
-    /// value used before, `37 56 27 67 56 27`, is "server" with the two hex
-    /// digits of each byte swapped (`73 65 72 76 65 72`), and the likely reason
-    /// the sensor's proofs did not verify on hardware.
+    /// Party identifier attached to proofs the sensor generates: "server", as
+    /// in mbedtls EC-JPAKE.
     private static let peerParty = Array("server".utf8)
 
     /// The randomizer the sensor expects in our round-3 proof. Fixed, not
