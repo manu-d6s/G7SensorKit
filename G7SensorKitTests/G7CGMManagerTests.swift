@@ -258,4 +258,47 @@ final class G7CGMManagerTests: XCTestCase {
 
         XCTAssertEqual(repaired, bluetoothManager.activePeripheralIdentifier)
     }
+
+    // MARK: - Backing off after the sensor refuses us
+
+    private func makeDirectSensor() -> G7Sensor {
+        let credentials = G7SensorCredentials(sensorID: "DXCM42", pairingCode: "1234", sharedKey: nil, peripheralIdentifier: nil)
+        return G7Sensor(mode: .direct, credentials: credentials, bluetoothManager: TestBluetoothManager())
+    }
+
+    func testRejectionBackoffGrowsToAnHour() {
+        XCTAssertEqual(G7Sensor.rejectionBackoff(afterRefusals: 1), TimeInterval(minutes: 15))
+        XCTAssertEqual(G7Sensor.rejectionBackoff(afterRefusals: 2), TimeInterval(minutes: 30))
+        XCTAssertEqual(G7Sensor.rejectionBackoff(afterRefusals: 3), TimeInterval(minutes: 60))
+        XCTAssertEqual(G7Sensor.rejectionBackoff(afterRefusals: 9), TimeInterval(minutes: 60))
+    }
+
+    func testARefusalHoldsOffTheNextAuthentication() throws {
+        let sensor = makeDirectSensor()
+        XCTAssertNil(sensor.authenticationBackoffUntil)
+
+        sensor.handleAuthenticationFailure(G7AuthenticatorError.rejected(authStatus: 2, failureCode: .deviceTypeRestriction))
+        let first = try XCTUnwrap(sensor.authenticationBackoffUntil)
+        XCTAssertEqual(first.timeIntervalSinceNow, TimeInterval(minutes: 15), accuracy: 5)
+
+        sensor.handleAuthenticationFailure(G7AuthenticatorError.rejected(authStatus: 2, failureCode: .challengeMismatch))
+        let second = try XCTUnwrap(sensor.authenticationBackoffUntil)
+        XCTAssertEqual(second.timeIntervalSinceNow, TimeInterval(minutes: 30), accuracy: 5)
+    }
+
+    func testOnlyARefusalBacksOff() {
+        let sensor = makeDirectSensor()
+        sensor.handleAuthenticationFailure(G7AuthenticatorError.rejected(authStatus: 2, failureCode: .noAppKey))
+        sensor.handleAuthenticationFailure(G7AuthenticatorError.timeout(step: "challenge"))
+        sensor.handleAuthenticationFailure(G7AuthenticatorError.challengeMismatch)
+        XCTAssertNil(sensor.authenticationBackoffUntil, "recoverable, or nothing the sensor counted against us")
+    }
+
+    func testNewCredentialsEndTheBackoff() {
+        let sensor = makeDirectSensor()
+        sensor.handleAuthenticationFailure(G7AuthenticatorError.rejected(authStatus: 2, failureCode: nil))
+        XCTAssertNotNil(sensor.authenticationBackoffUntil)
+        sensor.reconfigure(mode: .direct, credentials: G7SensorCredentials(sensorID: "DXCM77", pairingCode: "5678", sharedKey: nil, peripheralIdentifier: nil))
+        XCTAssertNil(sensor.authenticationBackoffUntil)
+    }
 }
