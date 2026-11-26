@@ -258,4 +258,21 @@ final class G7CGMManagerTests: XCTestCase {
 
         XCTAssertEqual(repaired, bluetoothManager.activePeripheralIdentifier)
     }
+
+    func testAnIssueReportDoesNotShowThePreviousSensorsCode() {
+        var state = G7CGMManagerState()
+        state.sensorID = "DXCM42"
+        state.pairingCode = "1234"
+        state.previousSensor = G7SensorRecord(
+            sensorID: "DXCM41", pairingCode: "8642", serialNumber: "123456789012", firmwareVersion: "2.18.2.88",
+            pairedAt: nil, activatedAt: nil, sessionLength: nil, warmupDuration: nil,
+            endedAt: Date(), endReason: .replaced, failureMessage: nil, failedAt: nil
+        )
+        let sensor = G7Sensor(mode: .direct, credentials: state.sensorCredentials, bluetoothManager: TestBluetoothManager())
+        let report = G7CGMManager(state: state, sensor: sensor).debugDescription
+
+        XCTAssertFalse(report.contains("8642"), "a replaced sensor may still be running")
+        XCTAssertTrue(report.contains("DXCM41"))
+        XCTAssertTrue(report.contains("123456789012"), "the serial stays, for diagnosis")
+    }
 }
