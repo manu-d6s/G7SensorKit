@@ -189,18 +189,51 @@ class G7JPAKETests: XCTestCase {
         XCTAssertEqual(recomputed, ourRound1.proofPoint)
     }
 
-    func testRound3UsesTheFixedRandomizer() throws {
-        // The sensor reproduces our round-3 commitment, so it must come from
-        // the fixed randomizer rather than a fresh draw: two runs with the
-        // same keys must produce the same proof point.
-        let makeRound3: () throws -> G7PCert = {
-            let jpake = G7JPAKE(pairingCode: "1155", random: { count in Data(repeating: 0x42, count: count) })
+    /// A fixed randomizer in the round-3 proof would let anyone who captured
+    /// the pairing solve the proof for the blinded key, try the 10,000 codes
+    /// against our round-2 public key, and rebuild the session key. Each run
+    /// must commit to a fresh one.
+    func testRound3DrawsAFreshRandomizer() throws {
+        // Rounds 1 and 2 draw a private key and a randomizer each (four
+        // draws), identical in both runs. Only the fifth draw, the round-3
+        // randomizer, differs between the runs.
+        func makeRound3(run: UInt8) throws -> G7PCert {
+            var draws = 0
+            let jpake = G7JPAKE(pairingCode: "1155", random: { count in
+                draws += 1
+                return Data(repeating: draws <= 4 ? 0x42 : run, count: count)
+            })
             let sensor = SimulatedSensor(pairingCode: "1155", seed: 5)
             _ = jpake.makeRound1()
             _ = jpake.makeRound2()
             return try G7PCert(data: jpake.makeRound3(peerRound1: sensor.round1, peerRound2: sensor.round2))
         }
-        XCTAssertEqual(try makeRound3().proofPoint, try makeRound3().proofPoint)
+        let first = try makeRound3(run: 1)
+        let second = try makeRound3(run: 2)
+        XCTAssertEqual(first.publicKey, second.publicKey)
+        XCTAssertNotEqual(first.proofPoint, second.proofPoint)
+    }
+
+    /// Our round-3 proof verifies under the standard Schnorr check, which is
+    /// all a verifier needs: it never has to know the randomizer.
+    func testOurRound3ProofVerifiesWithoutKnowingTheRandomizer() throws {
+        let jpake = G7JPAKE(pairingCode: "1155")
+        let sensor = SimulatedSensor(pairingCode: "1155", seed: 5)
+        let ourRound1 = try G7PCert(data: jpake.makeRound1())
+        _ = jpake.makeRound2()
+        let ourRound3 = try G7PCert(data: jpake.makeRound3(peerRound1: sensor.round1, peerRound2: sensor.round2))
+        let base = G7P256.add(G7P256.add(ourRound1.publicKey, sensor.round1.publicKey), sensor.round2.publicKey)
+        let challenge = SimulatedSensor.transcriptHash(
+            base: base,
+            proofPoint: ourRound3.proofPoint,
+            publicKey: ourRound3.publicKey,
+            party: Array("client".utf8)
+        )
+        let recomputed = G7P256.add(
+            G7P256.multiply(base, by: ourRound3.proof),
+            G7P256.multiply(ourRound3.publicKey, by: challenge)
+        )
+        XCTAssertEqual(recomputed, ourRound3.proofPoint)
     }
 
     func testCertEncodingRoundTrip() throws {

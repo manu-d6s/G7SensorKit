@@ -23,8 +23,7 @@ enum G7JPAKEError: Error {
 /// AES-128 key that authenticates every later reconnect.
 ///
 /// Deviations from textbook EC-JPAKE, all of them things the sensor requires:
-/// the party identifiers are fixed strings, the round-3 proof uses a fixed
-/// randomizer rather than a fresh one, and the transcript hash covers
+/// the party identifiers are fixed strings, and the transcript hash covers
 /// length-prefixed uncompressed points in a specific order.
 final class G7JPAKE {
 
@@ -35,11 +34,6 @@ final class G7JPAKE {
 
     /// Party identifier attached to proofs the sensor generates.
     private static let peerParty: [UInt8] = [0x37, 0x56, 0x27, 0x67, 0x56, 0x27]
-
-    /// The randomizer the sensor expects in our round-3 proof. Fixed, not
-    /// drawn fresh: the sensor reproduces this value when it verifies.
-    private static let round3Randomizer = G7BigUInt(bigEndianBytes: Data(hexadecimalString:
-        "fbc971b837e9491e45a4179ed33865c508a1e0a1d350f5af0f96370695fdc393")!)
 
     /// The pairing code as a big-endian integer over its ASCII digits.
     private let pin: G7BigUInt
@@ -95,8 +89,7 @@ final class G7JPAKE {
         return makeCert(
             base: base,
             publicKey: publicKey,
-            privateKey: blindedKey,
-            randomizer: G7JPAKE.round3Randomizer
+            privateKey: blindedKey
         ).encoded
     }
 
