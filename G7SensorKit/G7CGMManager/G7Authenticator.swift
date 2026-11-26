@@ -157,6 +157,10 @@ final class G7Authenticator {
     private var keyChallengeNonce: Data?
     private var keyChallengeSignature: Data?
 
+    /// The check of the sensor's key-exchange proofs, run after the handshake. Advisory only: the
+    /// sensor does not require it, and the AES challenge is the real gate.
+    private var deferredProofCheck: (() -> Void)?
+
     /// Receives a short description of each step as it happens, for the
     /// in-app device communication log. A tester reporting "it got stuck"
     /// is only diagnosable if these are visible outside Xcode. Never carries
@@ -187,6 +191,12 @@ final class G7Authenticator {
                 peripheral.setValueUpdateHandler(for: .authentication, handler: nil)
                 peripheral.setValueUpdateHandler(for: .certificate, handler: nil)
                 completion(.failure(error))
+            }
+            // Queued behind whatever the completion queued, such as the session's first reading
+            // request, so the advisory check never delays the sensor.
+            if let proofCheck = self.deferredProofCheck {
+                self.deferredProofCheck = nil
+                peripheralManager.perform { _ in proofCheck() }
             }
         }
     }
@@ -318,22 +328,26 @@ final class G7Authenticator {
 
         let sensorRound3 = try requestSensorRound(peripheral, round: 2)
 
+        // Answer first: the secret is not needed until the challenge, and the sensor is waiting.
+        try peripheral.writeCertificateBytes(ourRound3)
         let deriveStart = Date()
         let secret = try jpake.deriveSharedSecret(peerRound2: sensorRound2, peerRound3: sensorRound3)
-        try peripheral.writeCertificateBytes(ourRound3)
         let deriveSeconds = Date().timeIntervalSince(deriveStart)
 
         report(String(format: "Key exchange complete (compute: rounds 1-2 %.0f ms before the first request, round 3 %.0f ms, secret %.0f ms)",
                       precomputeSeconds * 1000, round3Seconds * 1000, deriveSeconds * 1000))
 
-        // Advisory only: the sensor does not require us to check its proofs,
-        // and the AES challenge below is the real gate.
-        let proofsVerified = jpake.validateRound1Or2(sensorRound1)
-            && jpake.validateRound1Or2(sensorRound2)
-            && jpake.validateRound3(peerRound1: sensorRound1, peerRound3: sensorRound3)
-        report(proofsVerified
-            ? "Key exchange: the sensor's proofs verified"
-            : "Key exchange: the sensor's proofs did not verify (advisory)")
+        // Advisory only: the sensor does not require us to check its proofs, and the AES
+        // challenge is the real gate. They cost several scalar multiplications, so they are
+        // checked once the handshake is over rather than inside the sensor's reply window.
+        deferredProofCheck = {
+            let proofsVerified = jpake.validateRound1Or2(sensorRound1)
+                && jpake.validateRound1Or2(sensorRound2)
+                && jpake.validateRound3(peerRound1: sensorRound1, peerRound3: sensorRound3)
+            self.report(proofsVerified
+                ? "Key exchange: the sensor's proofs verified"
+                : "Key exchange: the sensor's proofs did not verify (advisory)")
+        }
         return secret.prefix(16)
     }
 
