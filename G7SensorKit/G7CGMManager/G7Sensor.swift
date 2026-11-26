@@ -862,7 +862,7 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
         }
 
         // The name carries only two characters of identity. When the serial is known, the
-        // advertisement's serial checksum has to agree as well, as the Dexcom apps check it.
+        // advertisement's serial checksum has to agree as well.
         if let serial = credentials.expectedSerial {
             let advertisement = G7Advertisement(
                 name: name,
