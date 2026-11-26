@@ -198,6 +198,24 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
     /// readings has to wait. Newest wins. Settable from any queue.
     private let lockedPendingCalibration = Locked<(glucose: UInt16, date: Date)?>(nil)
 
+    /// Refusals in a row from the sensor after it checked our key (`05 02 xx`, other than "no app
+    /// key"), and when we may try again. Each one is final for that link, and four in a row make
+    /// the sensor stop accepting connections for a while, so retrying at every reading would lock
+    /// out the display that holds the slot as well as us.
+    private let lockedRejectionBackoff = Locked<(count: Int, until: Date)?>(nil)
+
+    /// How long to wait before authenticating again after `count` refusals in a row: 15 minutes,
+    /// then 30, then an hour from the third on.
+    static func rejectionBackoff(afterRefusals count: Int) -> TimeInterval {
+        let minutes = 15.0 * pow(2.0, Double(max(0, min(count, 3) - 1)))
+        return TimeInterval(minutes: min(minutes, 60))
+    }
+
+    /// When authentication may next be tried after the sensor refused us; nil when not backing off.
+    var authenticationBackoffUntil: Date? {
+        lockedRejectionBackoff.value?.until
+    }
+
     /// A meter reading older than this no longer describes the glucose the
     /// sensor is measuring, so it is dropped rather than sent.
     public static let calibrationMaxAge = TimeInterval(minutes: 5)
@@ -307,6 +325,7 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
     func reconfigure(mode: G7SessionMode, credentials: G7SensorCredentials) {
         self.mode = mode
         lockedCredentials.value = credentials
+        lockedRejectionBackoff.value = nil
         activationDate = nil
         latestReadingDate = nil
         needsVersionInfo = true
@@ -351,6 +370,7 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
             credentials.sharedKey = nil
             credentials.peripheralIdentifier = nil
         }
+        lockedRejectionBackoff.value = nil
         bluetoothManager.setActivePeripheralIdentifier(nil)
         bluetoothManager.disconnect()
         bluetoothManager.forgetPeripheral()
@@ -568,6 +588,7 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
             switch result {
             case .success(let authResult):
                 self.pendingAuth = false
+                self.lockedRejectionBackoff.value = nil
                 if authResult.didExchangeKeys {
                     self.lastPairingBondUnconfirmed = authResult.bondUnconfirmed
                     self.mutateCredentials { $0.sharedKey = authResult.sharedKey }
@@ -670,6 +691,16 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
         pendingAuth = false
         log.error("Authentication failed: %{public}@", String(describing: error))
 
+        if case G7AuthenticatorError.rejected(_, let failureCode) = error, failureCode != .noAppKey {
+            let backoff = lockedRejectionBackoff.mutate { backoff in
+                let count = (backoff?.count ?? 0) + 1
+                backoff = (count, Date().addingTimeInterval(G7Sensor.rejectionBackoff(afterRefusals: count)))
+            }
+            if let backoff = backoff {
+                logToDevice("The sensor refused this display (\(backoff.count) in a row); not authenticating again until \(backoff.until)", type: .connection)
+            }
+        }
+
         // A stale key is recoverable without the user: drop it, and the next
         // connection runs a full handshake with the pairing code we still
         // hold. Three signals say the key is stale: the sensor's answer to our
@@ -727,6 +758,11 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
 
         switch mode {
         case .direct:
+            if let until = authenticationBackoffUntil, Date() < until {
+                // Sending nothing records no refusal; the sensor closes the link on its own.
+                logToDevice("Not authenticating until \(until): the sensor refused this display", type: .connection)
+                break
+            }
             authenticate(peripheralManager)
 
         case .eavesdropping:
