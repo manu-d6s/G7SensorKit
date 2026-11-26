@@ -145,7 +145,8 @@ public struct G7CGMManagerState: RawRepresentable, Equatable {
             pairingCode: pairingCode,
             sharedKey: sharedKey,
             peripheralIdentifier: peripheralIdentifier,
-            configuredByAnotherController: configuredByAnotherController
+            configuredByAnotherController: configuredByAnotherController,
+            expectedSerial: transmitterVersion?.serialNumberString
         )
     }
 
@@ -254,13 +255,16 @@ public struct G7CGMManagerState: RawRepresentable, Equatable {
 }
 
 extension G7CGMManagerState {
-    /// What another controller needs to read this sensor directly: its identity, activation and
-    /// pairing code. The link, key and readings are this controller's own.
+    /// What another controller needs to read this sensor directly: its identity, activation,
+    /// pairing code and, once the sensor has reported it, its version reply, which carries the
+    /// serial the other controller checks advertisements against. The link, key and readings are
+    /// this controller's own.
     var sharedState: RawValue {
         var shared = G7CGMManagerState()
         shared.sensorID = sensorID
         shared.activatedAt = activatedAt
         shared.pairingCode = pairingCode
+        shared.transmitterVersion = transmitterVersion
         return shared.rawValue
     }
 
@@ -271,6 +275,7 @@ extension G7CGMManagerState {
         state.sensorID = passed.sensorID
         state.activatedAt = passed.activatedAt
         state.pairingCode = passed.pairingCode
+        state.transmitterVersion = passed.transmitterVersion
         state.sessionMode = .direct
         state.pairedAt = Date()
         state.configuredByAnotherController = true

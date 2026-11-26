@@ -239,6 +239,42 @@ final class G7DeviceHandoffTests: XCTestCase {
         XCTAssertEqual(manager.sensor.credentials.pairingCode, "9999")
     }
 
+    // MARK: - The serial, for picking the right sensor on first contact
+
+    private var versionReply: TransmitterVersionMessage {
+        TransmitterVersionMessage(data: Data(hexadecimalString: "4a002cc069489c37000031474141c03e55bcb300")!)!
+    }
+
+    func testTheExportCarriesTheSerialOnceTheSensorReportedIt() {
+        XCTAssertNil(G7CGMManagerState.adopted(from: phoneState.sharedState).sensorCredentials.expectedSerial)
+
+        var phone = phoneState
+        phone.transmitterVersion = versionReply
+        let adopted = G7CGMManagerState.adopted(from: makeManager(state: phone).exportConfiguration().state)
+        XCTAssertEqual(adopted.sensorCredentials.expectedSerial, versionReply.serialNumberString)
+    }
+
+    func testLearningTheSerialKeepsThePassedSessionsKeyAndPeripheral() {
+        var watch = G7CGMManagerState.adopted(from: phoneState.sharedState)
+        let key = Data(repeating: 9, count: 16)
+        let peripheral = UUID()
+        watch.sharedKey = key
+        watch.peripheralIdentifier = peripheral
+        let manager = makeManager(state: watch)
+        let session = manager.sensor
+
+        var phone = phoneState
+        phone.transmitterVersion = versionReply
+        manager.adoptConfiguration(makeManager(state: phone).exportConfiguration())
+
+        XCTAssertTrue(manager.sensor === session)
+        XCTAssertEqual(manager.sensor.credentials.sharedKey, key, "same sensor and code: no new key exchange")
+        XCTAssertEqual(manager.sensor.credentials.peripheralIdentifier, peripheral)
+        XCTAssertEqual(manager.sensor.credentials.expectedSerial, versionReply.serialNumberString)
+        XCTAssertEqual(manager.state.sharedKey, key)
+        XCTAssertEqual(manager.state.transmitterVersion, versionReply)
+    }
+
     func testAManagerSetUpHereKeepsItsOwnSensor() {
         let manager = makeManager(state: phoneState)
         var next = phoneState
