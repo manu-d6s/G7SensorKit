@@ -170,6 +170,10 @@ class G7BluetoothManager: NSObject {
     /// Isolated to `managerQueue`
     var managedPeripherals: [UUID:G7PeripheralManager] = [:]
 
+    /// Links handed to the delegate as readied, so each link starts its handshake exactly once.
+    /// Isolated to `managerQueue`.
+    private var readiedLinks = Set<UUID>()
+
     /// The platform's acquisition arm, or nil for the stock steps. Set once in init, before the
     /// central can call back.
     private(set) var acquisitionArm: G7AcquisitionArm?
@@ -609,6 +613,9 @@ extension G7BluetoothManager: CBCentralManagerDelegate {
 
         switch central.state {
         case .poweredOn:
+            for peripheralManager in Array(managedPeripherals.values) {
+                managerQueue_readyIfConnected(peripheralManager)
+            }
             managerQueue_scanForPeripheral()
         case .unknown, .unsupported:
             // Possibly CoreBluetooth's false report (see `schedulePoweredOnRecheck`): on a watch, a second
@@ -620,6 +627,8 @@ extension G7BluetoothManager: CBCentralManagerDelegate {
         case .resetting, .poweredOff, .unauthorized:
             fallthrough
         @unknown default:
+            // Every link goes with the radio.
+            readiedLinks.removeAll()
             acquisitionArm?.radioDown()
             if central.isScanning {
                 log.default("Stopping scan on central not powered on")
@@ -669,18 +678,32 @@ extension G7BluetoothManager: CBCentralManagerDelegate {
 
         if let peripheralManager = managedPeripherals[peripheral.identifier] {
             peripheralManager.centralManager(central, didConnect: peripheral)
+            managerQueue_readyIfConnected(peripheralManager)
+        }
+    }
 
-            if let delegate = delegate, case .poweredOn = centralManager.state, case .connected = peripheral.state {
-                if delegate.bluetoothManager(self, readied: peripheralManager) {
-                    managerQueue_stopScanning()
-                }
-            }
+    /// Hands a connected link to the delegate, once per link. A link restored by the system
+    /// arrives in `willRestoreState`, before the central is powered on, so it is readied at
+    /// power-on instead; otherwise nothing would start its handshake and the reading the system
+    /// relaunched the app for would be lost.
+    private func managerQueue_readyIfConnected(_ peripheralManager: G7PeripheralManager) {
+        dispatchPrecondition(condition: .onQueue(managerQueue))
+        let peripheral = peripheralManager.peripheral
+        guard let delegate = delegate, case .poweredOn = centralManager.state, case .connected = peripheral.state,
+              !readiedLinks.contains(peripheral.identifier)
+        else {
+            return
+        }
+        readiedLinks.insert(peripheral.identifier)
+        if delegate.bluetoothManager(self, readied: peripheralManager) {
+            managerQueue_stopScanning()
         }
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         dispatchPrecondition(condition: .onQueue(managerQueue))
         log.default("%{public}@: %{public}@", #function, peripheral)
+        readiedLinks.remove(peripheral.identifier)
         // Ignore errors indicating the peripheral disconnected remotely, as that's expected behavior
         if let error = error as NSError?, CBError(_nsError: error).code != .peripheralDisconnected {
             log.error("%{public}@: %{public}@", #function, error)
