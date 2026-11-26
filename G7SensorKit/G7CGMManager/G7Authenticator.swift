@@ -157,6 +157,13 @@ final class G7Authenticator {
     private var keyChallengeNonce: Data?
     private var keyChallengeSignature: Data?
 
+    /// The link the handshake runs on, so a wait can stop as soon as it drops instead of holding
+    /// the peripheral queue for the whole step timeout.
+    private weak var link: G7PeripheralManager?
+
+    /// How often a wait checks that the link is still up.
+    static let linkCheckInterval: TimeInterval = 1
+
     /// Receives a short description of each step as it happens, for the
     /// in-app device communication log. A tester reporting "it got stuck"
     /// is only diagnosable if these are visible outside Xcode. Never carries
@@ -180,7 +187,7 @@ final class G7Authenticator {
             do {
                 completion(.success(try self.run(peripheral)))
             } catch G7AuthenticatorError.linkLost {
-                self.report("Link dropped before authentication could start")
+                self.report("Link dropped during authentication; the next connection retries")
                 completion(.failure(G7AuthenticatorError.linkLost))
             } catch {
                 self.report("Authentication failed: \(error)")
@@ -198,6 +205,7 @@ final class G7Authenticator {
         guard peripheral.peripheral.state == .connected else {
             throw G7AuthenticatorError.linkLost
         }
+        link = peripheral
 
         report(storedSharedKey != nil
             ? "Authenticating with the saved key"
@@ -527,8 +535,8 @@ final class G7Authenticator {
         prefix: UInt8,
         step: String
     ) throws -> Data {
-        guard let result = buffer.waitForMessage(timeout: stepTimeout, matching: { $0.first == prefix }) else {
-            throw G7AuthenticatorError.timeout(step: step)
+        let result = try waitWhileLinked(step: step) { slice in
+            buffer.waitForMessage(timeout: slice, matching: { $0.first == prefix })
         }
         for stale in result.discarded where stale.first != 0x0A {
             // The 0A acknowledgements of our round requests arrive after the
@@ -555,11 +563,34 @@ final class G7Authenticator {
         defer {
             peripheral.setValueUpdateHandler(for: .certificate, handler: nil)
         }
-        guard let data = buffer.wait(forByteCount: count, timeout: stepTimeout) else {
-            report("\(step): timed out with \(buffer.count) of \(count) bytes")
-            throw G7AuthenticatorError.timeout(step: step)
+        do {
+            return try waitWhileLinked(step: step) { slice in
+                buffer.wait(forByteCount: count, timeout: slice)
+            }
+        } catch {
+            report("\(step): stopped with \(buffer.count) of \(count) bytes: \(error)")
+            throw error
         }
-        return data
+    }
+
+    /// Waits up to the step timeout for `attempt` to produce a value, in short slices, and gives
+    /// up as soon as the link drops: nothing more can arrive, and the peripheral queue this runs
+    /// on is the one CoreBluetooth work behind us is waiting for.
+    private func waitWhileLinked<T>(step: String, _ attempt: (TimeInterval) -> T?) throws -> T {
+        let deadline = Date().addingTimeInterval(stepTimeout)
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else {
+                throw G7AuthenticatorError.timeout(step: step)
+            }
+            if let value = attempt(min(G7Authenticator.linkCheckInterval, remaining)) {
+                return value
+            }
+            if let link = link, link.peripheral.state != .connected {
+                report("\(step): the link dropped")
+                throw G7AuthenticatorError.linkLost
+            }
+        }
     }
 
     /// Logs to the system log (so it survives into a sysdiagnose) and, when
