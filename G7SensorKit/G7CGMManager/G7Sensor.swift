@@ -304,14 +304,21 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
     /// Points this session at a different sensor (or a different way of
     /// reaching the same one) without rebuilding it. Everything learned about
     /// the previous sensor is forgotten; the first reading re-establishes it.
+    ///
+    /// Called from outside the manager queue (pairing, the eavesdropping switch, a new
+    /// configuration from another controller). The session state below is confined to that
+    /// queue, where a link may be appending backfill records right now, so it is reset there.
     func reconfigure(mode: G7SessionMode, credentials: G7SensorCredentials) {
+        dispatchPrecondition(condition: .notOnQueue(bluetoothManager.managerQueue))
         self.mode = mode
         lockedCredentials.value = credentials
-        activationDate = nil
-        latestReadingDate = nil
-        needsVersionInfo = true
-        pendingAuth = false
-        backfillBuffer = []
+        bluetoothManager.managerQueue.sync {
+            activationDate = nil
+            latestReadingDate = nil
+            needsVersionInfo = true
+            pendingAuth = false
+            backfillBuffer = []
+        }
         bluetoothManager.delegate = self
         bluetoothManager.setActivePeripheralIdentifier(credentials.peripheralIdentifier)
     }
