@@ -382,7 +382,13 @@ public class G7CGMManager: CGMManager {
         let pairedName = sensorName ?? handoff?.peripheralManager.peripheral.name
         let isSameSensor: Bool
         if let pairedName = pairedName, let currentID = state.sensorID, G7Sensor.isSensorName(pairedName) {
-            isSameSensor = pairedName.suffix(2) == currentID.suffix(2)
+            // The name carries only two characters of identity, so a replacement can share them.
+            // A direct session already holds the peripheral identifier from its own pairing; when
+            // the new pairing's differs, it is another sensor.
+            let isOtherPeripheral = state.sessionMode == .direct
+                && state.peripheralIdentifier != nil && peripheralIdentifier != nil
+                && state.peripheralIdentifier != peripheralIdentifier
+            isSameSensor = pairedName.suffix(2) == currentID.suffix(2) && !isOtherPeripheral
         } else {
             isSameSensor = false
         }

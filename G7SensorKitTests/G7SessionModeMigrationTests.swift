@@ -298,6 +298,42 @@ final class G7SessionModeMigrationTests: XCTestCase {
         XCTAssertEqual(restored.lastAuthenticationFailureDate, state.lastAuthenticationFailureDate)
     }
 
+    private func directState(peripheralIdentifier: UUID) -> G7CGMManagerState {
+        var state = G7CGMManagerState()
+        state.sessionMode = .direct
+        state.sensorID = "DXCM99"
+        state.activatedAt = Date(timeIntervalSinceNow: -54000)
+        state.pairingCode = "1234"
+        state.sharedKey = Data(repeating: 2, count: 16)
+        state.peripheralIdentifier = peripheralIdentifier
+        state.lifecycleAlertsScheduledFor = "DXCM99|1"
+        return state
+    }
+
+    /// A replacement whose name ends in the same two characters is still another sensor when its
+    /// peripheral is not the one this direct session paired with.
+    func testPairingAnotherPeripheralWithTheSameNameEndingIsANewSensor() {
+        let manager = makeManager(state: directState(peripheralIdentifier: UUID()))
+
+        manager.applyPairingResult(pairingCode: "5678", peripheralIdentifier: UUID(), sharedKey: Data(repeating: 3, count: 16), sensorName: "DXCM99")
+
+        XCTAssertNil(manager.state.activatedAt, "the new sensor's activation comes from its own readings")
+        XCTAssertNil(manager.state.lifecycleAlertsScheduledFor)
+        XCTAssertEqual(manager.state.previousSensor?.sensorID, "DXCM99")
+        XCTAssertEqual(manager.state.previousSensor?.pairingCode, "1234")
+    }
+
+    func testPairingTheSamePeripheralAgainKeepsItsSession() {
+        let identifier = UUID()
+        let manager = makeManager(state: directState(peripheralIdentifier: identifier))
+        let activatedAt = manager.state.activatedAt
+
+        manager.applyPairingResult(pairingCode: "1234", peripheralIdentifier: identifier, sharedKey: Data(repeating: 3, count: 16), sensorName: "DXCM99")
+
+        XCTAssertEqual(manager.state.activatedAt, activatedAt)
+        XCTAssertNil(manager.state.previousSensor)
+    }
+
     func testAnUnpairedDirectManagerWaitsForPairing() {
         var state = G7CGMManagerState()
         state.sessionMode = .direct
