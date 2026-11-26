@@ -15,7 +15,7 @@ import XCTest
 /// protocol and not merely agreeing with itself.
 private final class SimulatedSensor {
     /// The identifier the sensor attaches to its own proofs.
-    static let party: [UInt8] = [0x37, 0x56, 0x27, 0x67, 0x56, 0x27]
+    static let party = Array("server".utf8)
 
     private let pin: G7BigUInt
     private let privateKey1: G7BigUInt
