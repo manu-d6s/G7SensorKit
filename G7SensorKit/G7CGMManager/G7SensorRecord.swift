@@ -100,6 +100,15 @@ public struct G7SensorRecord: RawRepresentable, Equatable {
         failedAt = rawValue["failedAt"] as? Date
     }
 
+    /// The record for an issue report: as stored, with the pairing code reduced to whether there is
+    /// one, as for the current sensor. A replaced sensor may still be running.
+    var redactedDescription: String {
+        var raw = rawValue
+        raw["pairingCode"] = nil
+        raw["hasPairingCode"] = pairingCode != nil
+        return String(describing: raw)
+    }
+
     public var rawValue: RawValue {
         var raw: RawValue = [
             "sensorID": sensorID,

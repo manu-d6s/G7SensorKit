@@ -489,7 +489,7 @@ public class G7CGMManager: CGMManager {
             "hasDelegate: \(cgmManagerDelegate != nil)",
             "pairedAt: \(String(describing: state.pairedAt))",
             "sensorFailure: \(String(describing: state.sensorFailureMessage)) at \(String(describing: state.sensorFailedAt))",
-            "previousSensor: \(String(describing: state.previousSensor?.rawValue))",
+            "previousSensor: \(String(describing: state.previousSensor?.redactedDescription))",
             "calibrationAdviceSeen: \(state.calibrationAdviceSeen)",
         ]
         return lines.joined(separator: "\n")
