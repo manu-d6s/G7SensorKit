@@ -180,7 +180,7 @@ final class G7Authenticator {
             do {
                 completion(.success(try self.run(peripheral)))
             } catch G7AuthenticatorError.linkLost {
-                self.report("Link dropped before authentication could start")
+                self.report("Link dropped during authentication; the next connection retries")
                 completion(.failure(G7AuthenticatorError.linkLost))
             } catch {
                 self.report("Authentication failed: \(error)")
@@ -267,8 +267,15 @@ final class G7Authenticator {
             bonded = try finalizeAndBond(peripheral, authentication: authentication)
         } catch where !didExchangeKeys {
             // Authenticated but not bonded on a reconnect (05 01 02 after the system bond was lost): the key
-            // still holds, so the certificate phase bonds again. If that fails, pair again as before.
+            // still holds, so the certificate phase bonds again. The sensor has just accepted the key, so a
+            // link that dropped or a step that timed out says nothing against it: keep it, and the next
+            // connection bonds again. Only an answer we did not expect from a sensor still on the link
+            // falls back to pairing again with the code.
             report("Bonding again with the saved key failed: \(error)")
+            if G7Authenticator.isTransient(error) || peripheral.peripheral.state != .connected {
+                report("Keeping the saved key: the sensor accepted it, and the bond can be retried at the next connection")
+                throw G7AuthenticatorError.linkLost
+            }
             throw G7AuthenticatorError.storedKeyNotBonded(authStatus: status.authStatus, bondStatus: status.bondStatus)
         }
 
@@ -562,8 +569,17 @@ final class G7Authenticator {
         return data
     }
 
-    /// Logs to the system log (so it survives into a sysdiagnose) and, when
-    /// set, to the host's device communication log.
+    /// A failure that comes from the link or from waiting, not from what the sensor answered.
+    static func isTransient(_ error: Error) -> Bool {
+        switch error {
+        case G7AuthenticatorError.timeout, G7AuthenticatorError.linkLost,
+             PeripheralManagerError.timeout, PeripheralManagerError.notReady:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// CoreBluetooth's insufficient authentication/encryption ATT errors: the
     /// sensor wants an encrypted link and the phone could not provide one,
     /// which is what a bond the sensor no longer recognizes looks like.
@@ -576,6 +592,8 @@ final class G7Authenticator {
         return attError.code == .insufficientAuthentication || attError.code == .insufficientEncryption
     }
 
+    /// Logs to the system log (so it survives into a sysdiagnose) and, when
+    /// set, to the host's device communication log.
     private func report(_ message: String) {
         log.default("%{public}@", message)
         logHandler?(message)
