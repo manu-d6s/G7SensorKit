@@ -43,7 +43,7 @@ public struct G7SensorPackage: Equatable {
 
         // Only a four-digit value is a pairing code; anything else in the
         // field is some other product identifier.
-        if let candidate = elements["240"], candidate.count == 4, candidate.allSatisfy(\.isNumber) {
+        if let candidate = elements["240"], G7PairingService.isValidPairingCode(candidate) {
             pairingCode = candidate
         } else {
             pairingCode = nil

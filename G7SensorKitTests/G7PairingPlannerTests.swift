@@ -194,4 +194,14 @@ class G7PairingPlannerTests: XCTestCase {
             return XCTFail("a scan should give up on a mismatch")
         }
     }
+
+    func testPairingCodeDigitsAreNormalizedToASCII() {
+        XCTAssertEqual(G7PairingService.asciiDigits("\u{0661}\u{0662}\u{0663}\u{0664}"), "1234", "Arabic-Indic")
+        XCTAssertEqual(G7PairingService.asciiDigits("\u{06F1}\u{06F2}\u{06F3}\u{06F4}"), "1234", "Persian")
+        XCTAssertEqual(G7PairingService.asciiDigits("\u{FF11}\u{FF12}\u{FF13}\u{FF14}"), "1234", "full width")
+        XCTAssertEqual(G7PairingService.asciiDigits("1\u{00B2}3 4\u{00BD}"), "134", "only decimal digits count")
+        XCTAssertTrue(G7PairingService.isValidPairingCode("1234"))
+        XCTAssertFalse(G7PairingService.isValidPairingCode("\u{0661}\u{0662}\u{0663}\u{0664}"), "normalize first")
+        XCTAssertFalse(G7PairingService.isValidPairingCode("12\u{00B2}4"))
+    }
 }

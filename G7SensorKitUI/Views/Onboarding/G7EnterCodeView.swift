@@ -42,7 +42,7 @@ struct G7EnterCodeView: View {
                     .onChange(of: code) { _, newValue in
                         // Sanitising re-enters this handler, so wait for
                         // the second pass before acting on the code.
-                        let sanitized = String(newValue.filter(\.isNumber).prefix(4))
+                        let sanitized = String(G7PairingService.asciiDigits(newValue).prefix(4))
                         guard sanitized == newValue else {
                             code = sanitized
                             return

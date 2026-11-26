@@ -140,6 +140,15 @@ class G7JPAKETests: XCTestCase {
         XCTAssertEqual(result.client, result.sensor)
     }
 
+    /// A code typed on a number pad set to Arabic-Indic numerals, or pasted in full width, is the
+    /// same code: the exchange runs over its ASCII digits.
+    func testNonASCIIDigitsAreTheSameCode() throws {
+        for code in ["\u{0661}\u{0661}\u{0665}\u{0665}", "\u{FF11}\u{FF11}\u{FF15}\u{FF15}", "\u{06F1}\u{06F1}\u{06F5}\u{06F5}"] {
+            let result = try exchange(clientCode: code, sensorCode: "1155")
+            XCTAssertEqual(result.client, result.sensor, code)
+        }
+    }
+
     func testDerivedSecretVariesWithTheSensorKeys() throws {
         let first = try exchange(clientCode: "1155", sensorCode: "1155", seed: 5)
         let second = try exchange(clientCode: "1155", sensorCode: "1155", seed: 99)
