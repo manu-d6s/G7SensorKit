@@ -1495,6 +1495,16 @@ extension G7CGMManager: ShareableDeviceControl {
     /// A manager the user set up on this device keeps its own sensor.
     public func adoptConfiguration(_ configuration: SharedDeviceConfiguration) {
         guard state.configuredByAnotherController else { return }
+        let incoming = G7CGMManagerState.adopted(from: configuration.state)
+        // The same sensor and code with only the version reply added (the phone learned the
+        // serial): keep this controller's link and key, and just start checking the serial.
+        if incoming.sensorID == state.sensorID, incoming.pairingCode == state.pairingCode {
+            let updated = mutateState { state in
+                state.transmitterVersion = incoming.transmitterVersion ?? state.transmitterVersion
+            }
+            sensor.updateExpectedSerial(updated.sensorCredentials.expectedSerial)
+            return
+        }
         cancelSuspectedSessionEndScan()
         let newState = mutateState { state in
             state = G7CGMManagerState.adopted(from: configuration.state)

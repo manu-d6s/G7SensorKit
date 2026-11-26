@@ -142,6 +142,11 @@ struct G7SensorCredentials: Equatable {
     /// Passed in by another controller, whose peripheral handle means nothing here: this session
     /// keeps the one it finds itself.
     var configuredByAnotherController = false
+
+    /// The serial printed on the sensor's package, when known. Before this session has its own
+    /// peripheral identifier, an advertisement whose serial checksum does not match is not ours,
+    /// even if its name ends in the same two characters.
+    var expectedSerial: String?
 }
 
 
@@ -197,6 +202,11 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
     /// only up for a few seconds around each reading, so one entered between
     /// readings has to wait. Newest wins. Settable from any queue.
     private let lockedPendingCalibration = Locked<(glucose: UInt16, date: Date)?>(nil)
+
+    /// Peripherals a session configured by another controller adopted by name and then found
+    /// were not its sensor: the key exchange with the code it was given did not match. Skipped
+    /// from then on, so the search can reach the right sensor.
+    private let lockedMismatchedPeripherals = Locked<Set<UUID>>([])
 
     /// A meter reading older than this no longer describes the glucose the
     /// sensor is measuring, so it is dropped rather than sent.
@@ -334,6 +344,11 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
     /// Another controller moved to a different sensor (or code): the watch's counterpart of a pairing,
     /// on this session and its central. A second session would build a second central, and only one
     /// per app may claim the restore identifier: on the watch the second gets `.unsupported` for good.
+    /// The serial of the sensor this session already follows became known.
+    func updateExpectedSerial(_ serial: String?) {
+        mutateCredentials { $0.expectedSerial = serial }
+    }
+
     func switchSensor(credentials: G7SensorCredentials) {
         bluetoothManager.disconnect()
         bluetoothManager.forgetPeripheral()
@@ -585,9 +600,27 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
                 // Nothing wrong with the sensor; the next connection retries.
                 self.pendingAuth = false
             case .failure(let error):
+                self.releaseMismatchedAdoption(peripheralManager, error: error)
                 self.handleAuthenticationFailure(error)
             }
         }
+    }
+
+    /// A session set up from another controller's configuration has no peripheral identifier of
+    /// its own at first, so it adopts the first sensor whose name matches. When the key exchange
+    /// with the code it was given then does not match, that sensor was someone else's: let it go
+    /// and keep searching, instead of retrying it on every reading.
+    private func releaseMismatchedAdoption(_ peripheralManager: G7PeripheralManager, error: Error) {
+        guard case G7AuthenticatorError.challengeMismatch = error else { return }
+        let credentials = lockedCredentials.value
+        guard credentials.configuredByAnotherController, credentials.sharedKey == nil else { return }
+        let identifier = peripheralManager.peripheral.identifier
+        _ = lockedMismatchedPeripherals.mutate { $0.insert(identifier) }
+        logToDevice("\(peripheralManager.peripheral.name ?? "This sensor") did not accept the code; it is not ours, searching again", type: .connection)
+        guard credentials.peripheralIdentifier == identifier else { return }
+        mutateCredentials { $0.peripheralIdentifier = nil }
+        bluetoothManager.setActivePeripheralIdentifier(nil)
+        delegateQueue.async { self.delegate?.sensor(self, didAdoptPeripheral: nil) }
     }
 
     /// Subscribes to the session characteristics and asks for a reading right
@@ -821,6 +854,24 @@ public final class G7Sensor: G7BluetoothManagerDelegate {
         guard G7Sensor.isSensorName(name) else {
             log.info("Not connecting to peripheral: %{public}@", name)
             return .ignore
+        }
+
+        if lockedMismatchedPeripherals.value.contains(peripheral.identifier) {
+            log.info("Not connecting to %{public}@: it did not accept our code", name)
+            return .ignore
+        }
+
+        // The name carries only two characters of identity. When the serial is known, the
+        // advertisement's serial checksum has to agree as well, as the Dexcom apps check it.
+        if let serial = credentials.expectedSerial {
+            let advertisement = G7Advertisement(
+                name: name,
+                manufacturerData: advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data
+            )
+            guard advertisement.couldHaveSerial(serial) else {
+                log.info("Not connecting to %{public}@: its serial checksum is not our sensor's", name)
+                return .ignore
+            }
         }
 
         // If we're following this name or if we're scanning, connect
