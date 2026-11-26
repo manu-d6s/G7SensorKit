@@ -161,6 +161,27 @@ class G7JPAKETests: XCTestCase {
         XCTAssertTrue(result.clientJPAKE.validateRound3(peerRound1: result.sensor1, peerRound3: result.sensor3))
     }
 
+    /// A round-1 proof as a sensor would make it, over the given party identifier.
+    private func sensorProof(party: [UInt8]) -> G7PCert {
+        let privateKey = G7BigUInt(7_654_321)
+        let randomizer = G7BigUInt(1_234_567)
+        let publicKey = G7P256.multiplyGenerator(by: privateKey)
+        let proofPoint = G7P256.multiplyGenerator(by: randomizer)
+        let challenge = SimulatedSensor.transcriptHash(
+            base: G7P256.generator, proofPoint: proofPoint, publicKey: publicKey, party: party
+        )
+        let proof = G7BigUInt.subMod(randomizer, G7BigUInt.mulMod(challenge, privateKey, G7P256.order), G7P256.order)
+        return G7PCert(publicKey: publicKey, proofPoint: proofPoint, proof: proof)
+    }
+
+    /// The sensor signs its proofs as "server", the mbedtls EC-JPAKE identifier. The bytes used
+    /// before, 37 56 27 67 56 27, are "server" with each byte's hex digits swapped.
+    func testSensorProofsAreCheckedAgainstTheServerIdentifier() {
+        let jpake = G7JPAKE(pairingCode: "1155")
+        XCTAssertTrue(jpake.validateRound1Or2(sensorProof(party: Array("server".utf8))))
+        XCTAssertFalse(jpake.validateRound1Or2(sensorProof(party: [0x37, 0x56, 0x27, 0x67, 0x56, 0x27])))
+    }
+
     func testTamperedSensorProofIsRejected() throws {
         let result = try exchange(clientCode: "1155", sensorCode: "1155")
         let tampered = G7PCert(
