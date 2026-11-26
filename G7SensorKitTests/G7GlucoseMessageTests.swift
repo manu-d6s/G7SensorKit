@@ -127,6 +127,15 @@ final class G7GlucoseMessageTests: XCTestCase {
         XCTAssertEqual(907385, message.glucoseTimestamp)
     }
 
+    func testAnAgeBeyondTheMessageTimeDoesNotTrap() {
+        // Message time 100 s, age 0xffff: only a damaged frame says this.
+        let data = Data(hexadecimalString: "4e8064000000f6010001ffff67001b02670000")!
+        let message = G7GlucoseMessage(data: data)!
+        XCTAssertEqual(100, message.messageTimestamp)
+        XCTAssertEqual(0xffff, message.age)
+        XCTAssertEqual(0, message.glucoseTimestamp)
+    }
+
     func testFailedSensorStatusStillReportsAlgorithmState() {
         // A failed sensor keeps answering with status 0x80 and its last reading, 103 mg/dL from 2.7 h earlier.
         let data = Data(hexadecimalString: "4e80856f0a00f6010001f32567001b02670000")!
